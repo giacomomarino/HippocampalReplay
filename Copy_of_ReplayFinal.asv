@@ -1,0 +1,965 @@
+%% Training -- learn values
+transitionMatrix= [2, 1, 1, 1; ...
+                   3, 1, 2, 2; ...
+                   3, 2, 7, 4; ...
+                   4, 4, 3, 5; ...
+                   5, 6, 4, 5; ...
+                   5, 6, 6, 6; ...
+                   7, 7, 8, 3; ...
+                   8, 9, 8, 7; ... 
+                   8, 9, 9, 9;];
+
+valueFood = 3;
+valueWater = 1;
+vectorRewards= [0, 0, 0, 0, 0, valueFood, 0, 0, valueWater];
+
+% food at state 6, water at state 9
+
+% Set q-learning parameters
+LR=.01;
+epsilon=.5;
+gamma=.6;
+
+states = size(transitionMatrix,1);
+actions = size(transitionMatrix,2);
+QvalueWateratrix=zeros(states,actions);
+
+
+numTrials=100;
+for t=1:numTrials
+    currentState=1;
+    while ~(currentState==6 || currentState==9)
+        [action] = epsilonGreedy(QvalueWateratrix(currentState,:), epsilon);
+        newState = transitionMatrix(currentState,action);
+        moveProb = 1;
+        if newState == currentState
+            moveProb = 0;
+        end
+        RPE = vectorRewards(newState)+moveProb*gamma*max(QvalueWateratrix(newState,:)) - QvalueWateratrix(currentState, action);
+        QvalueWateratrix(currentState, action) = QvalueWateratrix(currentState, action) + LR*(RPE);
+        currentState = newState;
+    end
+end
+figure;
+bar(QvalueWateratrix(3,:))
+ylabel('q value')
+title('q values at State 3 After Training')
+set(gca, 'xticklabels', {'up', 'down', 'left', 'right'})
+ 
+%% Backwards Replay
+
+% q-learning parameters
+LR=.01;
+epsilon=.3;
+gamma=.7;
+
+numReplayEvents = 2;
+ValuesB=QvalueWateratrix;
+valueFood = 1;
+valueWater = 3;
+vectorRewards= [0, 0, 0, 0, 0, valueFood, 0, 0, valueWater];
+
+foodPath = [5, 2; 4, 4; 3, 4];
+waterPath = [8, 2; 7, 3; 3, 3];
+
+numTrials=50;
+vectorTerminalB = NaN(numTrials,1);
+
+
+for t=1:numTrials
+    currentState=1;
+    while ~(currentState==6 || currentState==9)
+        [action] = epsilonGreedy(ValuesB(currentState,:), epsilon);
+        
+        newState = transitionMatrix(currentState,action);
+        RPE = vectorRewards(newState)+gamma*max(ValuesB(newState,:)) - ValuesB(currentState, action);
+        ValuesB(currentState, action) = ValuesB(currentState, action) + LR*(RPE);
+        currentState = newState;
+        
+        
+        for r=1:numReplayEvents
+            % selection of action with a favored probability for the higher
+            % reward
+            P = [vectorRewards(9), vectorRewards(6)]./(vectorRewards(6)+vectorRewards(9));
+            poss_states = [9, 6];
+            poss_ind = find(rand<cumsum(P),1,'first');
+            simState = poss_states(poss_ind);
+            if simState == 6
+                for i = 1:length(foodPath)
+                    movedFrom = transitionMatrix(foodPath(i, 1), foodPath(i, 2));
+                    simRPE = vectorRewards(movedFrom)+gamma*max(ValuesB(movedFrom,:)) - ValuesB(foodPath(i, 1), foodPath(i, 2));
+                    ValuesB(foodPath(i, 1), foodPath(i, 2)) = ValuesB(foodPath(i, 1), foodPath(i, 2)) + LR*(simRPE);
+                end
+            else
+                for i = 1:length(waterPath)
+                    movedFrom = transitionMatrix(waterPath(i, 1), waterPath(i, 2));
+                    simRPE = vectorRewards(movedFrom)+gamma*max(ValuesB(movedFrom,:)) - ValuesB(waterPath(i, 1), waterPath(i, 2));
+                    ValuesB(waterPath(i, 1), waterPath(i, 2)) = ValuesB(waterPath(i, 1), waterPath(i, 2)) + LR*(simRPE);
+                end
+                
+            end
+        end
+    end
+    vectorTerminalB(t) = currentState;
+end
+terminal_countWater = (vectorTerminalB == 9);
+to_sumWater = reshape(terminal_countWater,[10,numTrials/10]);
+terminal_countFood = (vectorTerminalB == 6);
+to_sumFood = reshape(terminal_countFood,[10,numTrials/10]);
+sum_colsWater = sum(to_sumWater);
+sum_colsFood = sum(to_sumFood);
+
+
+figure(1);
+bar(ValuesB(3,:))
+ylabel('q value')
+set(gca, 'xticklabels', {'up', 'down', 'left', 'right'})
+title('q values at State 3 After Backwards Replay')
+
+backwardsWaterPath = ValuesB(3, 3);
+backwardsFoodPath = ValuesB(3, 4);
+
+backwardsSum_ColsWater = sum_colsWater;
+
+figure(2);
+plot([1:numTrials/10]*10, sum_colsWater./10);
+legend('Water')
+title('Proportion of Water chosen vs. Food chosen in Water-Restricted State')
+hold off
+
+%% Forwards Replay -- revaluing in restricted state
+
+% q-learning parameters
+LR=.01;
+epsilon=.3;
+gamma=.7;
+
+numReplayEvents = 2;
+ValuesB=QvalueWateratrix;
+valueFood = 1;
+valueWater = 3;
+vectorRewards= [0, 0, 0, 0, 0, valueFood, 0, 0, valueWater];
+
+foodPath = [3, 4; 4, 4; 5, 2];
+waterPath = [3, 3; 7, 3; 8, 2];
+
+numTrials=50;
+vectorTerminalB = NaN(numTrials,1);
+
+
+for t=1:numTrials
+    currentState=1;
+    while ~(currentState==6 || currentState==9)
+        [action] = epsilonGreedy(ValuesB(currentState,:), epsilon);
+        
+        newState = transitionMatrix(currentState,action);
+        RPE = vectorRewards(newState)+gamma*max(ValuesB(newState,:)) - ValuesB(currentState, action);
+        ValuesB(currentState, action) = ValuesB(currentState, action) + LR*(RPE);
+        currentState = newState;
+        
+        
+       for r=1:numReplayEvents
+            % selection of action with a favored probability for the higher
+            % reward
+            P = [vectorRewards(9), vectorRewards(6)]./(vectorRewards(6)+vectorRewards(9));
+            poss_states = [9, 6];
+            poss_ind = find(rand<cumsum(P),1,'first');
+            pathChosen = poss_states(poss_ind);
+            if pathChosen == 6
+                for i = 1:length(foodPath)
+                    movedFrom = transitionMatrix(foodPath(i, 1), foodPath(i, 2));
+                    simRPE = vectorRewards(movedFrom)+gamma*max(ValuesB(movedFrom,:)) - ValuesB(foodPath(i, 1), foodPath(i, 2));
+                    ValuesB(foodPath(i, 1), foodPath(i, 2)) = ValuesB(foodPath(i, 1), foodPath(i, 2)) + LR*(simRPE);
+                end
+            else
+                for i = 1:length(waterPath)
+                    movedFrom = transitionMatrix(waterPath(i, 1), waterPath(i, 2));
+                    simRPE = vectorRewards(movedFrom)+gamma*max(ValuesB(movedFrom,:)) - ValuesB(waterPath(i, 1), waterPath(i, 2));
+                    ValuesB(waterPath(i, 1), waterPath(i, 2)) = ValuesB(waterPath(i, 1), waterPath(i, 2)) + LR*(simRPE);
+                end
+                
+            end
+        end
+    end
+    vectorTerminalB(t) = currentState;
+end
+terminal_countWater = (vectorTerminalB == 9);
+to_sumWater = reshape(terminal_countWater,[10,numTrials/10]);
+terminal_countFood = (vectorTerminalB == 6);
+to_sumFood = reshape(terminal_countFood,[10,numTrials/10]);
+sum_colsWater = sum(to_sumWater);
+sum_colsFood = sum(to_sumFood);
+
+
+figure(1);
+bar(ValuesB(3,:))
+ylabel('q value')
+set(gca, 'xticklabels', {'up', 'down', 'left', 'right'})
+title('Q-Values at State 3 After Forwards Replay')
+
+forwardsWaterPath = ValuesB(3, 3);
+forwardsFoodPath = ValuesB(3, 4);
+
+figure(2);
+plot([1:numTrials/10]*10, sum_colsWater./10);
+legend('Water')
+title('Proportion of Water chosen vs. Food chosen in Water-Restricted State')
+
+figure(4);
+title('The Valuation of Choosing Water or Food in State 3 for Backwards and Forwards Replay')
+bar([forwardsWaterPath, backwardsWaterPath,forwardsFoodPath, backwardsFoodPath])
+ylabel('Q-value in State 3')
+set(gca, 'xticklabels', {'Forward Water Path', 'Backward Water Path', 'Forward Food Path', 'Backward Food Path'})
+
+
+figure(5);
+title('The Valuation of Choosing Water or Food in State 3 for Backwards and Forwards Replay')
+plot([1:numTrials/10]*10, sum_colsWater./10);
+hold on
+plot(1:numTrials/10]*10, backwardsSum_ColsWater./10)
+ylabel('Proportion Water Reward Reached')
+xlabel('trial #')
+
+%% comparison of backward replay of devalued vs valued trajectory
+% forward replay of devalued trajectory
+
+transitionMatrix= [2, 1, 1, 1; ...
+                   3, 1, 2, 2; ...
+                   3, 2, 7, 4; ...
+                   4, 4, 3, 5; ...
+                   5, 6, 4, 5; ...
+                   5, 6, 6, 6; ...
+                   7, 7, 8, 3; ...
+                   8, 9, 8, 7; ... 
+                   8, 9, 9, 9;];
+% q-learning parameters
+LR=.01;
+epsilon=.3;
+gamma=.8;
+
+states = size(transitionMatrix,1);
+actions = size(transitionMatrix,2);
+
+valueFood = 1;
+valueWater = 3;
+vectorRewards= [0, 0, 0, 0, 0, valueFood, 0, 0, valueWater];
+
+foodPath = [5, 2; 4, 4; 3, 4];
+waterPath = [8, 2; 7, 3; 3, 3];
+
+numReplayEvents = 5;
+%ValuesDV=zeros(states,actions);
+ValuesDV = QvalueWateratrix;
+numTrials=50;
+vectorTerminalDV = NaN(numTrials,1);
+for t=1:numTrials
+    currentState=1;
+    while ~(currentState==6 || currentState==9)
+        [action] = epsilonGreedy(ValuesDV(currentState,:), epsilon);
+        
+        newState = transitionMatrix(currentState,action);
+        
+        RPE = vectorRewards(newState)+ gamma*max(ValuesDV(newState,:)) - ValuesDV(currentState, action);
+        ValuesDV(currentState, action) = ValuesDV(currentState, action) + LR*(RPE);
+        currentState = newState;
+        
+        for r=1:numReplayEvents
+            % selection of action with a favored probability for the higher
+            % reward
+            P = 1- [vectorRewards(9), vectorRewards(6)]./(vectorRewards(6)+vectorRewards(9));
+            poss_states = [9, 6];
+            poss_ind = find(rand<cumsum(P),1,'first');
+            simState = poss_states(poss_ind);
+            if simState == 6
+                for i = 1:length(foodPath)
+                    movedFrom = transitionMatrix(foodPath(i, 1), foodPath(i, 2));
+                    simRPE = vectorRewards(movedFrom)+gamma*max(ValuesDV(movedFrom,:)) - ValuesDV(foodPath(i, 1), foodPath(i, 2));
+                    ValuesDV(foodPath(i, 1), foodPath(i, 2)) = ValuesDV(foodPath(i, 1), foodPath(i, 2)) + LR*(simRPE);
+                end
+            else
+                for i = 1:length(waterPath)
+                    movedFrom = transitionMatrix(waterPath(i, 1), waterPath(i, 2));
+                    simRPE = vectorRewards(movedFrom)+gamma*max(ValuesDV(movedFrom,:)) - ValuesDV(waterPath(i, 1), waterPath(i, 2));
+                    ValuesDV(waterPath(i, 1), waterPath(i, 2)) = ValuesDV(waterPath(i, 1), waterPath(i, 2)) + LR*(simRPE);
+                end
+                
+            end
+        end
+    end
+    vectorTerminalDV(t) = currentState;
+end
+if valueFood > valueWater
+    terminal_countDV = (vectorTerminalDV == 6);
+else
+    terminal_countDV = (vectorTerminalDV == 9);
+end
+
+to_sumDV = reshape(terminal_countDV,[10,numTrials/10]);
+sum_colsDV = sum(to_sumDV);
+figure(1);
+bar(ValuesDV(3,:))
+ylabel('q value')
+set(gca, 'xticklabels', {'up', 'down', 'left', 'right'})
+title('Q-Values at State 3 for Devalued Trajectory')
+ 
+% forward replay of valued trajectory
+
+
+%Values=zeros(states,actions);
+Values=QvalueWateratrix;
+vectorTerminal = NaN(numTrials,1);
+for t=1:numTrials
+    currentState=1;
+    while ~(currentState==6 || currentState==9)
+        [action] = epsilonGreedy(Values(currentState,:), epsilon);
+     
+        newState = transitionMatrix(currentState,action);
+        moveProb = 1;
+
+        RPE = vectorRewards(newState)+ gamma*max(Values(newState,:)) - Values(currentState, action);
+        Values(currentState, action) = Values(currentState, action) + LR*(RPE);
+        currentState = newState;
+        
+        for r=1:numReplayEvents
+            % selection of action with a favored probability for the higher
+            % reward
+            P = [vectorRewards(9), vectorRewards(6)]./(vectorRewards(6)+vectorRewards(9));
+            poss_states = [9, 6];
+            poss_ind = find(rand<cumsum(P),1,'first');
+            simState = poss_states(poss_ind);
+            if simState == 6
+                for i = 1:length(foodPath)
+                    movedFrom = transitionMatrix(foodPath(i, 1), foodPath(i, 2));
+                    simRPE = vectorRewards(movedFrom)+gamma*max(Values(movedFrom,:)) - Values(foodPath(i, 1), foodPath(i, 2));
+                    Values(foodPath(i, 1), foodPath(i, 2)) = Values(foodPath(i, 1), foodPath(i, 2)) + LR*(simRPE);
+                end
+            else
+                for i = 1:length(waterPath)
+                    movedFrom = transitionMatrix(waterPath(i, 1), waterPath(i, 2));
+                    simRPE = vectorRewards(movedFrom)+gamma*max(Values(movedFrom,:)) - Values(waterPath(i, 1), waterPath(i, 2));
+                    Values(waterPath(i, 1), waterPath(i, 2)) = Values(waterPath(i, 1), waterPath(i, 2)) + LR*(simRPE);
+                end
+                
+            end
+        end
+    end
+    vectorTerminal(t) = currentState;
+end
+
+if valueFood > valueWater
+    terminal_count = (vectorTerminal == 6);
+else
+    terminal_count = (vectorTerminal == 9);
+end
+
+to_sum = reshape(terminal_count,[10,numTrials/10]);
+sum_cols = sum(to_sum);
+figure(2);
+bar(Values(3,:))
+ylabel('q value')
+set(gca, 'xticklabels', {'up', 'down', 'left', 'right'})
+title('Q-Values at State 3 for Valued Trajectory')
+
+   
+figure(3);
+plot([1:numTrials/10]*10, sum_colsDV./10);
+hold on
+plot([1:numTrials/10]*10, sum_cols./10);
+legend('DV', 'V')
+title('Devalued vs. Valued Backwards Replay')
+hold off
+
+
+%% comparison of forward replay of devalued vs valued trajectory
+% forward replay of devalued trajectory
+
+transitionMatrix= [2, 1, 1, 1; ...
+                   3, 1, 2, 2; ...
+                   3, 2, 7, 4; ...
+                   4, 4, 3, 5; ...
+                   5, 6, 4, 5; ...
+                   5, 6, 6, 6; ...
+                   7, 7, 8, 3; ...
+                   8, 9, 8, 7; ... 
+                   8, 9, 9, 9;];
+% q-learning parameters
+LR=.01;
+epsilon=.3;
+gamma=.8;
+
+states = size(transitionMatrix,1);
+actions = size(transitionMatrix,2);
+
+valueFood = 1;
+valueWater = 3;
+vectorRewards= [0, 0, 0, 0, 0, valueFood, 0, 0, valueWater];
+
+foodPath = [3, 4; 4, 4; 5, 2];
+waterPath = [3, 3; 7, 3; 8, 2];
+
+
+numReplayEvents = 2;
+%ValuesDV=zeros(states,actions);
+ValuesDV = QvalueWateratrix;
+numTrials=100;
+vectorTerminalDV = NaN(numTrials,1);
+for t=1:numTrials
+    currentState=1;
+    while ~(currentState==6 || currentState==9)
+        [action] = epsilonGreedy(ValuesDV(currentState,:), epsilon);
+     
+        newState = transitionMatrix(currentState,action);
+        
+        RPE = vectorRewards(newState)+gamma*max(ValuesDV(newState,:)) - ValuesDV(currentState, action);
+        ValuesDV(currentState, action) = ValuesDV(currentState, action) + LR*(RPE);
+        currentState = newState;
+        
+        for r=1:numReplayEvents
+            % selection of action with a favored probability for the higher
+            % reward
+            P = 1 - [vectorRewards(9), vectorRewards(6)]./(vectorRewards(6)+vectorRewards(9));
+            poss_states = [9, 6];
+            poss_ind = find(rand<cumsum(P),1,'first');
+            simState = poss_states(poss_ind);
+            if simState == 6
+                for i = 1:length(foodPath)
+                    movedFrom = transitionMatrix(foodPath(i, 1), foodPath(i, 2));
+                    simRPE = vectorRewards(movedFrom)+gamma*max(ValuesDV(movedFrom,:)) - ValuesDV(foodPath(i, 1), foodPath(i, 2));
+                    ValuesDV(foodPath(i, 1), foodPath(i, 2)) = ValuesDV(foodPath(i, 1), foodPath(i, 2)) + LR*(simRPE);
+                end
+            else
+                for i = 1:length(waterPath)
+                    movedFrom = transitionMatrix(waterPath(i, 1), waterPath(i, 2));
+                    simRPE = vectorRewards(movedFrom)+gamma*max(ValuesDV(movedFrom,:)) - ValuesDV(waterPath(i, 1), waterPath(i, 2));
+                    ValuesDV(waterPath(i, 1), waterPath(i, 2)) = ValuesDV(waterPath(i, 1), waterPath(i, 2)) + LR*(simRPE);
+                end
+                
+            end
+        end
+    end
+    vectorTerminalDV(t) = currentState;
+end
+if valueFood > valueWater
+    terminal_countDV = (vectorTerminalDV == 6);
+else
+    terminal_countDV = (vectorTerminalDV == 9);
+end
+
+to_sumDV = reshape(terminal_countDV,[10,numTrials/10]);
+sum_colsDV = sum(to_sumDV);
+figure(1);
+bar(ValuesDV(3,:))
+ylabel('q value')
+set(gca, 'xticklabels', {'up', 'down', 'left', 'right'})
+title('Q-Values at State 3 for Devalued Trajectory')
+ 
+% forward replay of valued trajectory
+
+
+%Values=zeros(states,actions);
+Values=QvalueWateratrix;
+vectorTerminal = NaN(numTrials,1);
+for t=1:numTrials
+    currentState=1;
+    while ~(currentState==6 || currentState==9)
+        [action] = epsilonGreedy(Values(currentState,:), epsilon);
+     
+        newState = transitionMatrix(currentState,action);
+
+        RPE = vectorRewards(newState)+gamma*max(Values(newState,:)) - Values(currentState, action);
+        Values(currentState, action) = Values(currentState, action) + LR*(RPE);
+        currentState = newState;
+        
+        for r=1:numReplayEvents
+            % selection of action with a favored probability for the higher
+            % reward
+            P = [vectorRewards(9), vectorRewards(6)]./(vectorRewards(6)+vectorRewards(9));
+            poss_states = [9, 6];
+            poss_ind = find(rand<cumsum(P),1,'first');
+            simState = poss_states(poss_ind);
+            if simState == 6
+                for i = 1:length(foodPath)
+                    movedFrom = transitionMatrix(foodPath(i, 1), foodPath(i, 2));
+                    simRPE = vectorRewards(movedFrom)+gamma*max(Values(movedFrom,:)) - Values(foodPath(i, 1), foodPath(i, 2));
+                    Values(foodPath(i, 1), foodPath(i, 2)) = Values(foodPath(i, 1), foodPath(i, 2)) + LR*(simRPE);
+                end
+            else
+                for i = 1:length(waterPath)
+                    movedFrom = transitionMatrix(waterPath(i, 1), waterPath(i, 2));
+                    simRPE = vectorRewards(movedFrom)+gamma*max(Values(movedFrom,:)) - Values(waterPath(i, 1), waterPath(i, 2));
+                    Values(waterPath(i, 1), waterPath(i, 2)) = Values(waterPath(i, 1), waterPath(i, 2)) + LR*(simRPE);
+                end
+                
+            end
+        end
+    end
+    vectorTerminal(t) = currentState;
+end
+
+if valueFood > valueWater
+    terminal_count = (vectorTerminal == 6);
+else
+    terminal_count = (vectorTerminal == 9);
+end
+
+to_sum = reshape(terminal_count,[10,numTrials/10]);
+sum_cols = sum(to_sum);
+figure(2);
+bar(Values(3,:))
+ylabel('q value')
+set(gca, 'xticklabels', {'up', 'down', 'left', 'right'})
+title('Q-Values at State 3 for Valued Trajectory')
+
+   
+figure(3);
+plot([1:numTrials/10]*10, sum_colsDV./10);
+hold on
+plot([1:numTrials/10]*10, sum_cols./10);
+title('Devalued vs. Valued Forwards Replay')
+legend('DV', 'V')
+hold off
+
+%% plots for various parameters -- LR
+
+transitionMatrix= [2, 1, 1, 1; ...
+                   3, 1, 2, 2; ...
+                   3, 2, 7, 4; ...
+                   4, 4, 3, 5; ...
+                   5, 6, 4, 5; ...
+                   5, 6, 6, 6; ...
+                   7, 7, 8, 3; ...
+                   8, 9, 8, 7; ... 
+                   8, 9, 9, 9;];
+% q-learning parameters default
+LR=.01;
+epsilon=.3;
+gamma=.8;
+
+states = size(transitionMatrix,1);
+actions = size(transitionMatrix,2);
+
+valueFood = 5;
+valueWater = 15;
+vectorRewards= [0, 0, 0, 0, 0, valueFood, 0, 0, valueWater];
+
+numReplayEvents = 100;
+numTrials=150;
+
+var_lr=0:0.01:.2;
+lr_trialDV=zeros(length(var_lr), 1);
+lr_trialV=zeros(length(var_lr), 1);
+
+for l=1:length(var_lr)
+    LR=var_lr(l);
+    ValuesDV = QvalueWateratrix;
+    
+    vectorTerminalDV = NaN(numTrials,1);
+    for t=1:numTrials
+        currentState=1;
+        while ~(currentState==6 || currentState==9)
+            [action] = epsilonGreedy(ValuesDV(currentState,:), epsilon);
+         
+            newState = transitionMatrix(currentState,action);
+            RPE = vectorRewards(newState)+gamma*max(ValuesDV(newState,:)) - ValuesDV(currentState, action);
+            ValuesDV(currentState, action) = ValuesDV(currentState, action) + LR*(RPE);
+            currentState = newState;
+            
+            currentStateSim = 1;
+            for r=1:numReplayEvents
+                % selection of action with a favored probability for the lower
+                % reward
+                if currentStateSim == 3
+                    P = 1-[vectorRewards(9), vectorRewards(6)]./(vectorRewards(6)+vectorRewards(9));
+                    poss_states = [7, 4];
+                    poss_actions = [3, 4];
+                    poss_ind = find(rand<cumsum(P),1,'first');
+                    simAction = poss_actions(poss_ind);
+                    simState = poss_states(poss_ind);
+                else
+                    [simAction] = epsilonGreedy(ValuesDV(currentStateSim,:), epsilon);
+                    simState = transitionMatrix(currentStateSim,simAction);
+                end
+                simRPE = vectorRewards(simState)+gamma*max(ValuesDV(simState,:)) - ValuesDV(currentStateSim, simAction);
+                ValuesDV(currentStateSim, simAction) = ValuesDV(simState, simAction) + LR*(simRPE);
+                currentStateSim = simState;
+                
+                if currentStateSim == 6 || currentStateSim == 9   
+                    currentStateSim = 1;
+                end
+                
+            end
+        end
+        vectorTerminalDV(t) = currentState;
+    end
+    if valueFood > valueWater
+        terminal_countDV = (vectorTerminalDV == 6);
+    else
+        terminal_countDV = (vectorTerminalDV == 9);
+    end
+    
+    to_sumDV = reshape(terminal_countDV,[10,numTrials/10]);
+    sum_colsDV = sum(to_sumDV);
+    lr_trialDV(l) = find(sum_colsDV>7, 1, 'first')*10;
+    
+    
+    
+    % forward replay of valued trajectory
+    
+    
+    %Values=zeros(states,actions);
+    Values=QvalueWateratrix;
+    vectorTerminal = NaN(numTrials,1);
+    for t=1:numTrials
+        currentState=1;
+        while ~(currentState==6 || currentState==9)
+            [action] = epsilonGreedy(Values(currentState,:), epsilon);
+         
+            newState = transitionMatrix(currentState,action);
+            RPE = vectorRewards(newState)+gamma*max(Values(newState,:)) - Values(currentState, action);
+            Values(currentState, action) = Values(currentState, action) + LR*(RPE);
+            currentState = newState;
+            
+            currentStateSim = 1;
+            for r=1:numReplayEvents
+                % selection of action with a favored probability for the higher
+                % reward
+                if currentStateSim == 3
+                    P = [vectorRewards(9), vectorRewards(6)]./(vectorRewards(6)+vectorRewards(9));
+                    poss_states = [7, 4];
+                    poss_actions = [3, 4];
+                    poss_ind = find(rand<cumsum(P),1,'first');
+                    simAction = poss_actions(poss_ind);
+                    simState = poss_states(poss_ind);
+                else
+                    [simAction] = epsilonGreedy(Values(currentStateSim,:), epsilon);
+                    simState = transitionMatrix(currentStateSim,simAction);
+                end
+                simRPE = vectorRewards(simState)+gamma*max(Values(simState,:)) - Values(currentStateSim, simAction);
+                Values(currentStateSim, simAction) = Values(simState, simAction) + LR*(simRPE);
+                currentStateSim = simState;
+                
+                if currentStateSim == 6 || currentStateSim == 9   
+                    currentStateSim = 1;
+                end
+                
+            end
+        end
+        vectorTerminal(t) = currentState;
+    end
+    
+    if valueFood > valueWater
+        terminal_count = (vectorTerminal == 6);
+    else
+        terminal_count = (vectorTerminal == 9);
+    end
+    
+    to_sum = reshape(terminal_count,[10,numTrials/10]);
+    sum_cols = sum(to_sum);
+    lr_trialV(l) = find(sum_cols>7, 1, 'first')*10;
+end
+
+
+plot(var_lr, lr_trialV);
+hold on
+plot(var_lr, lr_trialDV);
+legend('DV', 'V')
+hold off
+
+%% plots for various parameters -- epsilon
+
+transitionMatrix= [2, 1, 1, 1; ...
+                   3, 1, 2, 2; ...
+                   3, 2, 7, 4; ...
+                   4, 4, 3, 5; ...
+                   5, 6, 4, 5; ...
+                   5, 6, 6, 6; ...
+                   7, 7, 8, 3; ...
+                   8, 9, 8, 7; ... 
+                   8, 9, 9, 9;];
+% q-learning parameters default
+LR=.01;
+epsilon= 0.3;
+gamma=.8;
+
+states = size(transitionMatrix,1);
+actions = size(transitionMatrix,2);
+
+valueFood = 5;
+valueWater = 15;
+vectorRewards= [0, 0, 0, 0, 0, valueFood, 0, 0, valueWater];
+
+numReplayEvents = 100;
+numTrials=150;
+
+var_e=0:0.1:0.5;
+e_trialDV=zeros(length(var_e), 1);
+e_trialV=zeros(length(var_e), 1);
+for e=1:length(var_e)
+    epsilon=var_e(e);
+    ValuesDV = QvalueWateratrix;
+    
+    vectorTerminalDV = NaN(numTrials,1);
+    for t=1:numTrials
+        currentState=1;
+        while ~(currentState==6 || currentState==9)
+            [action] = epsilonGreedy(ValuesDV(currentState,:), epsilon);
+         
+            newState = transitionMatrix(currentState,action);
+            RPE = vectorRewards(newState)+gamma*max(ValuesDV(newState,:)) - ValuesDV(currentState, action);
+            ValuesDV(currentState, action) = ValuesDV(currentState, action) + LR*(RPE);
+            currentState = newState;
+            
+            currentStateSim = 1;
+            for r=1:numReplayEvents
+                % selection of action with a favored probability for the lower
+                % reward
+                if currentStateSim == 3
+                    P = 1-[vectorRewards(9), vectorRewards(6)]./(vectorRewards(6)+vectorRewards(9));
+                    poss_states = [7, 4];
+                    poss_actions = [3, 4];
+                    poss_ind = find(rand<cumsum(P),1,'first');
+                    simAction = poss_actions(poss_ind);
+                    simState = poss_states(poss_ind);
+                else
+                    [simAction] = epsilonGreedy(ValuesDV(currentStateSim,:), epsilon);
+                    simState = transitionMatrix(currentStateSim,simAction);
+                end
+                simRPE = vectorRewards(simState)+gamma*max(ValuesDV(simState,:)) - ValuesDV(currentStateSim, simAction);
+                ValuesDV(currentStateSim, simAction) = ValuesDV(simState, simAction) + LR*(simRPE);
+                currentStateSim = simState;
+                
+                if currentStateSim == 6 || currentStateSim == 9   
+                    currentStateSim = 1;
+                end
+                
+            end
+        end
+        vectorTerminalDV(t) = currentState;
+    end
+    if valueFood > valueWater
+        terminal_countDV = (vectorTerminalDV == 6);
+    else
+        terminal_countDV = (vectorTerminalDV == 9);
+    end
+    
+    to_sumDV = reshape(terminal_countDV,[10,numTrials/10]);
+    sum_colsDV = sum(to_sumDV);
+    e_trialDV(e) = find(sum_colsDV>7, 1, 'first')*10;
+    
+    
+    
+    % forward replay of valued trajectory
+    
+    
+    %Values=zeros(states,actions);
+    Values=QvalueWateratrix;
+    vectorTerminal = NaN(numTrials,1);
+    for t=1:numTrials
+        currentState=1;
+        while ~(currentState==6 || currentState==9)
+            [action] = epsilonGreedy(Values(currentState,:), epsilon);
+         
+            newState = transitionMatrix(currentState,action);
+            RPE = vectorRewards(newState)+gamma*max(Values(newState,:)) - Values(currentState, action);
+            Values(currentState, action) = Values(currentState, action) + LR*(RPE);
+            currentState = newState;
+            
+            currentStateSim = 1;
+            for r=1:numReplayEvents
+                % selection of action with a favored probability for the higher
+                % reward
+                if currentStateSim == 3
+                    P = [vectorRewards(9), vectorRewards(6)]./(vectorRewards(6)+vectorRewards(9));
+                    poss_states = [7, 4];
+                    poss_actions = [3, 4];
+                    poss_ind = find(rand<cumsum(P),1,'first');
+                    simAction = poss_actions(poss_ind);
+                    simState = poss_states(poss_ind);
+                else
+                    [simAction] = epsilonGreedy(Values(currentStateSim,:), epsilon);
+                    simState = transitionMatrix(currentStateSim,simAction);
+                end
+                simRPE = vectorRewards(simState)+gamma*max(Values(simState,:)) - Values(currentStateSim, simAction);
+                Values(currentStateSim, simAction) = Values(simState, simAction) + LR*(simRPE);
+                currentStateSim = simState;
+                
+                if currentStateSim == 6 || currentStateSim == 9   
+                    currentStateSim = 1;
+                end
+                
+            end
+        end
+        vectorTerminal(t) = currentState;
+    end
+    
+    if valueFood > valueWater
+        terminal_count = (vectorTerminal == 6);
+    else
+        terminal_count = (vectorTerminal == 9);
+    end
+    
+    to_sum = reshape(terminal_count,[10,numTrials/10]);
+    sum_cols = sum(to_sum);
+    e_trialV(e) = find(sum_cols>7, 1, 'first')*10;
+end
+
+
+plot(0:0.1:0.5, e_trialV);
+hold on
+plot(0:0.1:0.5, e_trialDV);
+legend('DV', 'V')
+hold off
+
+
+%% plots for various parameters -- gamma
+
+transitionMatrix= [2, 1, 1, 1; ...
+                   3, 1, 2, 2; ...
+                   3, 2, 7, 4; ...
+                   4, 4, 3, 5; ...
+                   5, 6, 4, 5; ...
+                   5, 6, 6, 6; ...
+                   7, 7, 8, 3; ...
+                   8, 9, 8, 7; ... 
+                   8, 9, 9, 9;];
+% q-learning parameters default
+LR=.01;
+epsilon=.3;
+gamma=.8;
+
+states = size(transitionMatrix,1);
+actions = size(transitionMatrix,2);
+
+valueFood = 5;
+valueWater = 15;
+vectorRewards= [0, 0, 0, 0, 0, valueFood, 0, 0, valueWater];
+
+numReplayEvents = 100;
+numTrials=150;
+
+var_g=0.5:0.1:1;
+g_trialDV=zeros(length(var_g), 1);
+g_trialV=zeros(length(var_g), 1);
+for g=1:length(var_g)
+    gamma=var_g(g);
+    ValuesDV = QvalueWateratrix;
+    
+    vectorTerminalDV = NaN(numTrials,1);
+    for t=1:numTrials
+        currentState=1;
+        while ~(currentState==6 || currentState==9)
+            [action] = epsilonGreedy(ValuesDV(currentState,:), epsilon);
+         
+            newState = transitionMatrix(currentState,action);
+            RPE = vectorRewards(newState)+gamma*max(ValuesDV(newState,:)) - ValuesDV(currentState, action);
+            ValuesDV(currentState, action) = ValuesDV(currentState, action) + LR*(RPE);
+            currentState = newState;
+            
+            currentStateSim = 1;
+            for r=1:numReplayEvents
+                % selection of action with a favored probability for the lower
+                % reward
+                if currentStateSim == 3
+                    P = 1-[vectorRewards(9), vectorRewards(6)]./(vectorRewards(6)+vectorRewards(9));
+                    poss_states = [7, 4];
+                    poss_actions = [3, 4];
+                    poss_ind = find(rand<cumsum(P),1,'first');
+                    simAction = poss_actions(poss_ind);
+                    simState = poss_states(poss_ind);
+                else
+                    [simAction] = epsilonGreedy(ValuesDV(currentStateSim,:), epsilon);
+                    simState = transitionMatrix(currentStateSim,simAction);
+                end
+                simRPE = vectorRewards(simState)+gamma*max(ValuesDV(simState,:)) - ValuesDV(currentStateSim, simAction);
+                ValuesDV(currentStateSim, simAction) = ValuesDV(simState, simAction) + LR*(simRPE);
+                currentStateSim = simState;
+                
+                if currentStateSim == 6 || currentStateSim == 9   
+                    currentStateSim = 1;
+                end
+                
+            end
+        end
+        vectorTerminalDV(t) = currentState;
+    end
+    if valueFood > valueWater
+        terminal_countDV = (vectorTerminalDV == 6);
+    else
+        terminal_countDV = (vectorTerminalDV == 9);
+    end
+    
+    to_sumDV = reshape(terminal_countDV,[10,numTrials/10]);
+    sum_colsDV = sum(to_sumDV);
+    g_trialDV(g) = find(sum_colsDV>7, 1, 'first')*10;
+    
+    
+    
+    % forward replay of valued trajectory
+    
+    
+    %Values=zeros(states,actions);
+    Values=QvalueWateratrix;
+    vectorTerminal = NaN(numTrials,1);
+    for t=1:numTrials
+        currentState=1;
+        while ~(currentState==6 || currentState==9)
+            [action] = epsilonGreedy(Values(currentState,:), epsilon);
+         
+            newState = transitionMatrix(currentState,action);
+            RPE = vectorRewards(newState)+gamma*max(Values(newState,:)) - Values(currentState, action);
+            Values(currentState, action) = Values(currentState, action) + LR*(RPE);
+            currentState = newState;
+            
+            currentStateSim = 1;
+            for r=1:numReplayEvents
+                % selection of action with a favored probability for the higher
+                % reward
+                if currentStateSim == 3
+                    P = [vectorRewards(9), vectorRewards(6)]./(vectorRewards(6)+vectorRewards(9));
+                    poss_states = [7, 4];
+                    poss_actions = [3, 4];
+                    poss_ind = find(rand<cumsum(P),1,'first');
+                    simAction = poss_actions(poss_ind);
+                    simState = poss_states(poss_ind);
+                else
+                    [simAction] = epsilonGreedy(Values(currentStateSim,:), epsilon);
+                    simState = transitionMatrix(currentStateSim,simAction);
+                end
+                simRPE = vectorRewards(simState)+gamma*max(Values(simState,:)) - Values(currentStateSim, simAction);
+                Values(currentStateSim, simAction) = Values(simState, simAction) + LR*(simRPE);
+                currentStateSim = simState;
+                
+                if currentStateSim == 6 || currentStateSim == 9   
+                    currentStateSim = 1;
+                end
+                
+            end
+        end
+        vectorTerminal(t) = currentState;
+    end
+    
+    if valueFood > valueWater
+        terminal_count = (vectorTerminal == 6);
+    else
+        terminal_count = (vectorTerminal == 9);
+    end
+    
+    to_sum = reshape(terminal_count,[10,numTrials/10]);
+    sum_cols = sum(to_sum);
+    g_trialV(g) = find(sum_cols>7, 1, 'first')*10;
+end
+
+
+plot(0.5:0.1:1, g_trialV);
+hold on
+plot(0.5:0.1:1, g_trialDV);
+legend('DV', 'V')
+hold off
+
+
+
+
+
+
+
+
